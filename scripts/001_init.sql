@@ -1,0 +1,9 @@
+CREATE EXTENSION IF NOT EXISTS pgcrypto;
+
+CREATE TABLE IF NOT EXISTS brands(
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  brand_name VARCHAR(120) UNIQUE NOT NULL,
+  status VARCHAR(16) NOT NULL DEFAULT 'active',
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
