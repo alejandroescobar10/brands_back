@@ -1,50 +1,61 @@
-from fastapi import APIRouter, Depends, HTTPException, status, Query
+from fastapi import APIRouter, Depends, HTTPException, status, Query, Response
 from sqlalchemy.ext.asyncio import AsyncSession
-import sqlalchemy as sa
-from uuid import UUID
+from sqlalchemy.exc import IntegrityError  # <- para capturar UNIQUE, etc.
 
 from api.db.session import get_session
-from api.db.models.brand import Brand
 from api.schemas.brand import BrandCreate, BrandUpdate, BrandOut, BrandListOut
+from api.repositories.brands_repo import (
+    create_brand,
+    get_brand_by_id,
+    list_brands,
+    update_brand,
+    delete_brand,
+)
 
 router = APIRouter()
 
-def _uuid_or_404(brand_id: str) -> UUID:
-    try:
-        return UUID(brand_id)
-    except Exception:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Marca no encontrada")
 
 @router.post("", response_model=BrandOut, status_code=status.HTTP_201_CREATED)
 async def create_brand_endpoint(
     payload: BrandCreate,
+    response: Response,
     session: AsyncSession = Depends(get_session),
 ) -> BrandOut:
-    brand = Brand(
-        brand_name=payload.brand_name,
-        status=payload.status or "active",
-    )
-    session.add(brand)
+    """
+    Crea una marca y devuelve el registro creado.
+
+    201 Created: éxito
+    409 Conflict: brand_name duplicado (UNIQUE)
+    422 Unprocessable Entity: validación de payload
+    """
     try:
-        # aseguramos PK y valores por defecto antes de commit
-        await session.flush()
-        await session.refresh(brand)
-        await session.commit()
-    except sa.exc.IntegrityError:
-        await session.rollback()
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="brand_name ya existe")
-    return BrandOut.model_validate(brand)
+        brand = await create_brand(session, payload)
+        # Hint REST: ubicación del nuevo recurso
+        response.headers["Location"] = f"/api/brands/{brand.id}"
+        return brand
+    except IntegrityError:
+        # El repo ya hace rollback; aquí solo mapeamos a HTTP
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="brand_name ya existe",
+        )
+
 
 @router.get("/{brand_id}", response_model=BrandOut)
 async def get_brand_endpoint(
     brand_id: str,
     session: AsyncSession = Depends(get_session),
 ) -> BrandOut:
-    uid = _uuid_or_404(brand_id)
-    brand = await session.get(Brand, uid)
+    """
+    Obtiene una marca por ID.
+    404 si no existe.
+    """
+    brand = await get_brand_by_id(session, brand_id)
     if not brand:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Marca no encontrada")
-    return BrandOut.model_validate(brand)
+    # El repo puede devolver Brand (ORM) o BrandOut; normalizamos:
+    return brand if isinstance(brand, BrandOut) else BrandOut.model_validate(brand)
+
 
 @router.get("", response_model=BrandListOut)
 async def list_brands_endpoint(
@@ -53,29 +64,11 @@ async def list_brands_endpoint(
     q: str | None = None,
     session: AsyncSession = Depends(get_session),
 ) -> BrandListOut:
-    filters = []
-    if q:
-        filters.append(Brand.brand_name.ilike(f"%{q}%"))
+    """
+    Lista marcas con paginación y filtro por nombre (q).
+    """
+    return await list_brands(session, limit, offset, q)
 
-    # total
-    total = await session.scalar(
-        sa.select(sa.func.count(Brand.id)).where(*filters)  # pylint: disable=not-callable
-    )
-
-    # items
-    items = await session.scalars(
-        sa.select(Brand)
-        .where(*filters)
-        .order_by(Brand.created_at.desc())
-        .limit(limit)
-        .offset(offset)
-    )
-    rows = items.all()
-
-    return BrandListOut(
-        total=total or 0,
-        items=[BrandOut.model_validate(b) for b in rows],
-    )
 
 @router.put("/{brand_id}", response_model=BrandOut)
 async def update_brand_endpoint(
@@ -83,40 +76,31 @@ async def update_brand_endpoint(
     payload: BrandUpdate,
     session: AsyncSession = Depends(get_session),
 ) -> BrandOut:
-    uid = _uuid_or_404(brand_id)
-    brand = await session.get(Brand, uid)
-    if not brand:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Marca no encontrada")
-
-    data = payload.model_dump(exclude_none=True)
-    if "brand_name" in data:
-        brand.brand_name = data["brand_name"]
-    if "status" in data:
-        brand.status = data["status"]
-
+    """
+    Actualiza parcialmente una marca.
+    404 si no existe.
+    409 si brand_name entra en conflicto (UNIQUE).
+    """
     try:
-        # updated_at desde DB
-        brand.updated_at = sa.func.now()  # pylint: disable=not-callable
-        await session.flush()
-        await session.refresh(brand)
-        await session.commit()
-    except sa.exc.IntegrityError:
-        await session.rollback()
+        updated = await update_brand(session, brand_id, payload)
+        if not updated:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Marca no encontrada")
+        return updated if isinstance(updated, BrandOut) else BrandOut.model_validate(updated)
+    except IntegrityError:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Conflicto de brand_name")
-    return BrandOut.model_validate(brand)
+
 
 @router.delete("/{brand_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_brand_endpoint(
     brand_id: str,
     session: AsyncSession = Depends(get_session),
 ) -> None:
-    uid = _uuid_or_404(brand_id)
-    res = await session.execute(
-        sa.delete(Brand).where(Brand.id == uid).returning(Brand.id)
-    )
-    deleted = res.scalar_one_or_none()
-    if deleted is None:
-        # no hubo cambios
+    """
+    Elimina una marca por ID.
+    204 No Content si borra.
+    404 si no existe.
+    """
+    ok = await delete_brand(session, brand_id)
+    if not ok:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Marca no encontrada")
-    await session.commit()
     return None

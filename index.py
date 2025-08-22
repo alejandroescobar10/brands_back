@@ -1,8 +1,6 @@
 import sys, asyncio
 if sys.platform.startswith("win"):
     asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
-
-
 import sqlalchemy as sa
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -17,7 +15,10 @@ app = FastAPI(title="Brands API", version="1.0.0")
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=settings.cors_allow_origins,
+    allow_origins=[
+        "http://localhost:5173",      # frontend local
+        # "https://tu-front.vercel.app",  # (añade cuando despliegues el front)
+    ],
     allow_methods=["*"],
     allow_headers=["*"],
     allow_credentials=True,
