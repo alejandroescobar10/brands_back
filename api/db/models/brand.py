@@ -12,3 +12,4 @@ class Brand(Base):
     status = Column(String(16), nullable=False, server_default=text("'active'"))
     created_at = Column(TIMESTAMP(timezone=True), nullable=False, server_default=text("now()"))
     updated_at = Column(TIMESTAMP(timezone=True), nullable=False, server_default=text("now()"))
+    
