@@ -1,6 +1,6 @@
 # 1) Clonar y entrar
 
-git clone <tu_repo.git>
+git clone [<tu_repo.git>](https://github.com/alejandroescobar10/brands_back.git)
 cd brands_back
 
 # 2) Crear/activar venv
