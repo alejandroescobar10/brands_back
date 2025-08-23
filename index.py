@@ -17,7 +17,7 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=[
         "http://localhost:5173",      # frontend local
-        # "https://tu-front.vercel.app",  # (añade cuando despliegues el front)
+        "https://brands-front.vercel.app/",  # frontend en Vercel
     ],
     allow_methods=["*"],
     allow_headers=["*"],
